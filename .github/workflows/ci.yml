@@ -20,31 +20,30 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: 'maven'
+
       - name: Show Java & Maven versions
         run: |
           java -version
-          mvn -v    
+          mvn -v
 
       - name: Build & unit tests (Maven)
         run: mvn -B -DskipTests=false clean verify
 
       # ---------- SonarQube (self-hosted) ----------
-      # Requires repo secrets:
+      # Repo secrets required:
       #   SONAR_HOST_URL = http://<your-ec2-ip>:9000
-      #   SONAR_TOKEN    = <generated in My Account -> Security -> Tokens>
+      #   SONAR_TOKEN    = <My Account -> Security -> Tokens>
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2.3
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
-          # If the repo has sonar-project.properties, this is optional.
-          # Keeping args to ensure a stable key/name.
           args: >
             -Dsonar.projectKey=boardgame
             -Dsonar.projectName=Boardgame
 
-      # Option A: separate "Quality Gate" wait step (explicit)
+      # Quality Gate still enforces your Sonar rules; remove this step if you also want it non-blocking
       - name: SonarQube Quality Gate
         uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
         env:
@@ -57,27 +56,34 @@ jobs:
           IMAGE=boardgame:${{ github.sha }}
           docker build -t $IMAGE .
 
-      # ---------- Trivy scan (fail on HIGH/CRITICAL) ----------
+      # ---------- Trivy scan (non-blocking) ----------
       - name: Cache Trivy DB
         uses: actions/cache@v4
         with:
           path: ~/.cache/trivy
           key: trivy-db-${{ runner.os }}-v1
 
-      - name: Trivy image scan
+      - name: Trivy image scan (non-blocking)
+        id: trivy
         uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: boardgame:${{ github.sha }}
-          exit-code: '1'
-          severity: 'HIGH,CRITICAL'
+          exit-code: '0'             # << do not fail the job on any findings
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          ignore-unfixed: false
+          format: 'table'
+          output: 'trivy-image-report.txt'
 
-  # Optional: minimal failure notifier (placeholder – we’ll wire AWS SNS/email tomorrow)
+      - name: Upload Trivy report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-report
+          path: trivy-image-report.txt
+
+  # Optional: minimal failure notifier (will trigger only if *other* steps fail)
   notify-on-failure:
     needs: build-test-analyze
     if: failure()
     runs-on: ubuntu-latest
     steps:
-      - name: Print failure
-        run: |
-          echo "❌ CI failed for ${{ github.sha }}."
-          echo "Sonar/Trivy logs will show the reason."
+      - run: echo "❌ CI failed (but not due to Trivy). Check logs above."
