@@ -37,8 +37,6 @@ jobs:
             </toolchain>
           </toolchains>
           XML
-          java -version
-          mvn -v
 
       - name: Build with Maven
         run: mvn -B -DskipTests=false clean verify
