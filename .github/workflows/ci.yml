@@ -5,6 +5,10 @@ on:
     branches: [ main ]
   pull_request:
 
+permissions:
+  id-token: write    # needed for OIDC (assume-role)
+  contents: read
+
 jobs:
   build-test-analyze:
     runs-on: ubuntu-latest
@@ -15,7 +19,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Temurin JDK 21
-      # Installs JDK 21 and sets JAVA_HOME and PATH for this job
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -57,8 +60,8 @@ jobs:
         run: mvn -B -DskipTests=false clean verify
 
       # ---------- SonarQube (self-hosted) ----------
-      # Repo secrets required:
-      #   SONAR_HOST_URL = http://<your-ec2-ip>:9000
+      # Requires repo secrets:
+      #   SONAR_HOST_URL = http://<your-sonar-ec2>:9000
       #   SONAR_TOKEN    = <My Account -> Security -> Tokens>
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2.3
@@ -82,7 +85,7 @@ jobs:
           IMAGE=boardgame:${{ github.sha }}
           docker build -t $IMAGE .
 
-      # ---------- Trivy scan (non-blocking) ----------
+      # ---------- Trivy (non-blocking) ----------
       - name: Cache Trivy DB
         uses: actions/cache@v4
         with:
@@ -94,7 +97,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: boardgame:${{ github.sha }}
-          exit-code: '0'             # never fail the job on findings
+          exit-code: '0'     # never fail the job on findings
           severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
           ignore-unfixed: false
           format: 'table'
@@ -106,9 +109,48 @@ jobs:
           name: trivy-image-report
           path: trivy-image-report.txt
 
-  notify-on-failure:
-    needs: build-test-analyze
-    if: failure()
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "❌ CI failed. Check logs above."
+      # ---------- Push image to Amazon ECR ----------
+      # Provide either:
+      #  - OIDC:  AWS_ROLE_TO_ASSUME, AWS_REGION, ECR_REPO, (ECR_REGISTRY optional)
+      #  - or Access Keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, ECR_REPO
+      # Optional ECR_REGISTRY secret lets you override registry if needed.
+
+      - name: Configure AWS credentials (OIDC role)
+        if: ${{ secrets.AWS_ROLE_TO_ASSUME != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Configure AWS credentials (access keys)
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Tag & Push image to ECR
+        run: |
+          # Resolve registry and repo
+          REGISTRY="${{ steps.ecr.outputs.registry }}"
+          if [ -n "${{ secrets.ECR_REGISTRY }}" ]; then
+            REGISTRY="${{ secrets.ECR_REGISTRY }}"
+          fi
+          REPO="${{ secrets.ECR_REPO }}"
+          if [ -z "$REPO" ]; then
+            echo "ECR_REPO secret is required (e.g., 'boardgame')."; exit 1
+          fi
+
+          SRC="boardgame:${{ github.sha }}"
+          DST_SHA="$REGISTRY/$REPO:${{ github.sha }}"
+          DST_LATEST="$REGISTRY/$REPO:latest"
+
+          docker tag "$SRC" "$DST_SHA"
+          docker tag "$SRC" "$DST_LATEST"
+          docker push "$DST_SHA"
+          docker push "$DST_LATEST"
