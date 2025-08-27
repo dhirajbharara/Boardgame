@@ -6,13 +6,24 @@ on:
   pull_request:
 
 permissions:
-  id-token: write    # needed for OIDC (assume-role)
+  id-token: write   # required for OIDC (assume-role)
   contents: read
 
 jobs:
   build-test-analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
+    # Map secrets to env so we can use them in `if:` conditions
+    env:
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ECR_REPO: ${{ secrets.ECR_REPO }}
+      ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
 
     steps:
       - name: Checkout
@@ -23,7 +34,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-          cache: 'maven'
+          cache: maven
           check-latest: true
 
       - name: Show Java & Maven versions (sanity)
@@ -53,21 +64,17 @@ jobs:
             </toolchain>
           </toolchains>
           XML
-          echo "Wrote ~/.m2/toolchains.xml:"
           cat ~/.m2/toolchains.xml
 
       - name: Build & unit tests (Maven)
         run: mvn -B -DskipTests=false clean verify
 
-      # ---------- SonarQube (self-hosted) ----------
-      # Requires repo secrets:
-      #   SONAR_HOST_URL = http://<your-sonar-ec2>:9000
-      #   SONAR_TOKEN    = <My Account -> Security -> Tokens>
+      # ---------- SonarQube ----------
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2.3
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
         with:
           args: >
             -Dsonar.projectKey=boardgame
@@ -76,8 +83,8 @@ jobs:
       - name: SonarQube Quality Gate
         uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
 
       # ---------- Build Docker image ----------
       - name: Build Docker image
@@ -93,13 +100,10 @@ jobs:
           key: trivy-db-${{ runner.os }}-v1
 
       - name: Trivy image scan (non-blocking)
-        id: trivy
         uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: boardgame:${{ github.sha }}
-          exit-code: '0'     # never fail the job on findings
-          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
-          ignore-unfixed: false
+          exit-code: '0'
           format: 'table'
           output: 'trivy-image-report.txt'
 
@@ -110,25 +114,20 @@ jobs:
           path: trivy-image-report.txt
 
       # ---------- Push image to Amazon ECR ----------
-      # Provide either:
-      #  - OIDC:  AWS_ROLE_TO_ASSUME, AWS_REGION, ECR_REPO, (ECR_REGISTRY optional)
-      #  - or Access Keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, ECR_REPO
-      # Optional ECR_REGISTRY secret lets you override registry if needed.
-
       - name: Configure AWS credentials (OIDC role)
-        if: ${{ secrets.AWS_ROLE_TO_ASSUME != '' }}
+        if: ${{ env.AWS_ROLE_TO_ASSUME != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Configure AWS credentials (access keys)
-        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+        if: ${{ env.AWS_ROLE_TO_ASSUME == '' && env.AWS_ACCESS_KEY_ID != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: ecr
@@ -136,20 +135,16 @@ jobs:
 
       - name: Tag & Push image to ECR
         run: |
-          # Resolve registry and repo
           REGISTRY="${{ steps.ecr.outputs.registry }}"
-          if [ -n "${{ secrets.ECR_REGISTRY }}" ]; then
-            REGISTRY="${{ secrets.ECR_REGISTRY }}"
+          if [ -n "${{ env.ECR_REGISTRY }}" ]; then
+            REGISTRY="${{ env.ECR_REGISTRY }}"
           fi
-          REPO="${{ secrets.ECR_REPO }}"
-          if [ -z "$REPO" ]; then
+          if [ -z "${{ env.ECR_REPO }}" ]; then
             echo "ECR_REPO secret is required (e.g., 'boardgame')."; exit 1
           fi
-
           SRC="boardgame:${{ github.sha }}"
-          DST_SHA="$REGISTRY/$REPO:${{ github.sha }}"
-          DST_LATEST="$REGISTRY/$REPO:latest"
-
+          DST_SHA="$REGISTRY/${{ env.ECR_REPO }}:${{ github.sha }}"
+          DST_LATEST="$REGISTRY/${{ env.ECR_REPO }}:latest"
           docker tag "$SRC" "$DST_SHA"
           docker tag "$SRC" "$DST_LATEST"
           docker push "$DST_SHA"
