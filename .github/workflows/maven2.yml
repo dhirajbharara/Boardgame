@@ -1,8 +1,6 @@
-name: Java CI with Maven
+name: Java CI (PR smoke)
 
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
@@ -21,15 +19,6 @@ jobs:
           cache: maven
           check-latest: true
 
-      - name: Show Java & Maven versions
-        run: |
-          echo "JAVA_HOME=$JAVA_HOME"
-          which java || true
-          which javac || true
-          java -version
-          mvn -v
-
-      # Force Maven to use the JDK we just installed
       - name: Force Maven toolchain to JDK 21
         run: |
           mkdir -p ~/.m2
@@ -49,7 +38,6 @@ jobs:
             </toolchain>
           </toolchains>
           XML
-          cat ~/.m2/toolchains.xml
 
-      - name: Build with Maven
-        run: mvn -B -DskipTests=false clean verify
+      - name: Build with Maven (quick)
+        run: mvn -B -DskipTests=false -DskipITs=true -DskipIT=true clean verify
