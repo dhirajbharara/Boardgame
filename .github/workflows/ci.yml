@@ -15,16 +15,43 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Temurin JDK 21
+      # Installs JDK 21 and sets JAVA_HOME and PATH for this job
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
           cache: 'maven'
+          check-latest: true
 
-      - name: Show Java & Maven versions
+      - name: Show Java & Maven versions (sanity)
         run: |
+          echo "JAVA_HOME=$JAVA_HOME"
+          which java || true
+          which javac || true
           java -version
           mvn -v
+
+      - name: Force Maven toolchain to JDK 21
+        run: |
+          mkdir -p ~/.m2
+          cat > ~/.m2/toolchains.xml <<'XML'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <toolchains xmlns="http://maven.apache.org/TOOLCHAINS/1.1.0"
+                      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                      xsi:schemaLocation="http://maven.apache.org/TOOLCHAINS/1.1.0 https://maven.apache.org/xsd/toolchains-1.1.0.xsd">
+            <toolchain>
+              <type>jdk</type>
+              <provides>
+                <version>21</version>
+              </provides>
+              <configuration>
+                <jdkHome>${env.JAVA_HOME}</jdkHome>
+              </configuration>
+            </toolchain>
+          </toolchains>
+          XML
+          echo "Wrote ~/.m2/toolchains.xml:"
+          cat ~/.m2/toolchains.xml
 
       - name: Build & unit tests (Maven)
         run: mvn -B -DskipTests=false clean verify
@@ -43,7 +70,6 @@ jobs:
             -Dsonar.projectKey=boardgame
             -Dsonar.projectName=Boardgame
 
-      # Quality Gate still enforces your Sonar rules; remove this step if you also want it non-blocking
       - name: SonarQube Quality Gate
         uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
         env:
@@ -68,7 +94,7 @@ jobs:
         uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: boardgame:${{ github.sha }}
-          exit-code: '0'             # << do not fail the job on any findings
+          exit-code: '0'             # never fail the job on findings
           severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
           ignore-unfixed: false
           format: 'table'
@@ -80,10 +106,9 @@ jobs:
           name: trivy-image-report
           path: trivy-image-report.txt
 
-  # Optional: minimal failure notifier (will trigger only if *other* steps fail)
   notify-on-failure:
     needs: build-test-analyze
     if: failure()
     runs-on: ubuntu-latest
     steps:
-      - run: echo "❌ CI failed (but not due to Trivy). Check logs above."
+      - run: echo "❌ CI failed. Check logs above."
