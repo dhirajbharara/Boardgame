@@ -1,53 +1,118 @@
-# BoardgameListingWebApp
+BoardGame DevOps Project
 
-## Description
+This project demonstrates a full DevOps pipeline integrating SonarQube, GitHub Actions, AWS ECR, Docker, Trivy, and EKS (Kubernetes) for CI/CD and deployment.
 
-**Board Game Database Full-Stack Web Application.**
-This web application displays lists of board games and their reviews. While anyone can view the board game lists and reviews, they are required to log in to add/ edit the board games and their reviews. The 'users' have the authority to add board games to the list and add reviews, and the 'managers' have the authority to edit/ delete the reviews on top of the authorities of users.  
+🚀 Project Overview
 
-## Technologies
+Containerized application pushed to AWS ECR
 
-- Java
-- Spring Boot
-- Amazon Web Services(AWS) EC2
-- Thymeleaf
-- Thymeleaf Fragments
-- HTML5
-- CSS
-- JavaScript
-- Spring MVC
-- JDBC
-- H2 Database Engine (In-memory)
-- JUnit test framework
-- Spring Security
-- Twitter Bootstrap
-- Maven
+CI/CD pipeline with GitHub Actions
 
-## Features
+Code quality checks using SonarQube
 
-- Full-Stack Application
-- UI components created with Thymeleaf and styled with Twitter Bootstrap
-- Authentication and authorization using Spring Security
-  - Authentication by allowing the users to authenticate with a username and password
-  - Authorization by granting different permissions based on the roles (non-members, users, and managers)
-- Different roles (non-members, users, and managers) with varying levels of permissions
-  - Non-members only can see the boardgame lists and reviews
-  - Users can add board games and write reviews
-  - Managers can edit and delete the reviews
-- Deployed the application on AWS EC2
-- JUnit test framework for unit testing
-- Spring MVC best practices to segregate views, controllers, and database packages
-- JDBC for database connectivity and interaction
-- CRUD (Create, Read, Update, Delete) operations for managing data in the database
-- Schema.sql file to customize the schema and input initial data
-- Thymeleaf Fragments to reduce redundancy of repeating HTML elements (head, footer, navigation)
+Security scanning using Trivy
 
-## How to Run
+Deployment to Amazon EKS cluster with monitoring via Grafana
 
-1. Clone the repository
-2. Open the project in your IDE of choice
-3. Run the application
-4. To use initial user data, use the following credentials.
-  - username: bugs    |     password: bunny (user role)
-  - username: daffy   |     password: duck  (manager role)
-5. You can also sign-up as a new user and customize your role to play with the application! 😊
+📋 Prerequisites
+
+AWS account with IAM role (GitHubActionsECRPushRole) and OIDC identity provider
+
+Terraform installed
+
+Docker installed
+
+AWS CLI configured (ap-south-1 region)
+
+eksctl, kubectl, and helm installed
+
+⚙️ Setup Steps
+1. Create AWS ECR Repository
+aws ecr create-repository \
+  --repository-name boardgame \
+  --image-tag-mutability IMMUTABLE \
+  --region ap-south-1
+
+2. Deploy SonarQube with Terraform
+terraform apply \
+  -var="vpc_id=vpc-xxxx" \
+  -var="public_subnet_id=subnet-xxxx" \
+  -var="allowed_cidrs=[\"<your-ip>\"]" \
+  -var="key_name=dhiraj.pem"
+
+3. Generate SonarQube Token
+
+Login at http://<ec2-public-ip>:9000
+
+Go to My Account → Security → Tokens
+
+Generate SONAR_TOKEN and save it as a GitHub secret
+
+4. Configure GitHub Secrets
+
+In your repository → Settings → Secrets & Variables → Actions:
+
+SONAR_TOKEN
+
+SONAR_HOST_URL (e.g. http://13.233.20.93:9000/)
+
+AWS credentials and any other required secrets
+
+5. Add GitHub Actions Workflow
+
+Create .github/workflows/ci.yml including:
+
+SonarQube Scan & Quality Gate
+
+Docker Build
+
+Trivy Image Scan & Report Upload
+
+Push Docker image to AWS ECR
+
+6. Create and Configure EKS Cluster
+eksctl create cluster \
+  --name boardgame \
+  --version 1.29 \
+  --region ap-south-1 \
+  --nodegroup-name ng-1 \
+  --node-type t3.medium \
+  --nodes 2 --nodes-min 2 --nodes-max 4 \
+  --managed
+
+
+Update kubeconfig:
+
+aws eks update-kubeconfig --name boardgame --region ap-south-1
+kubectl get nodes
+
+
+Verify cluster:
+
+aws cloudformation describe-stacks \
+  --region ap-south-1 \
+  --stack-name eksctl-boardgame-cluster \
+  --query 'Stacks[0].StackStatus'
+
+aws eks describe-cluster \
+  --name boardgame \
+  --region ap-south-1 \
+  --query 'cluster.status'
+
+📊 Monitoring
+
+Grafana is integrated for cluster and workload monitoring.
+
+🔑 Credentials
+
+Default SonarQube credentials:
+
+Username: admin
+
+Password: #######
+
+⚠️ Change after first login.
+
+📝 License
+
+This project is for educational and demo purposes.
