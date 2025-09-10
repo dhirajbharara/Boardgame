@@ -39,6 +39,7 @@ terraform apply \
   -var="public_subnet_id=subnet-xxxx" \
   -var="allowed_cidrs=[\"<your-ip>\"]" \
   -var="key_name=dhiraj.pem"
+<img width="1140" height="764" alt="image" src="https://github.com/user-attachments/assets/d621a3b9-bd6b-4820-bf20-44330b4386c0" />
 
 3. Generate SonarQube Token
 
@@ -57,6 +58,8 @@ SONAR_TOKEN
 SONAR_HOST_URL (e.g. http://13.233.20.93:9000/)
 
 AWS credentials and any other required secrets
+<img width="823" height="403" alt="image" src="https://github.com/user-attachments/assets/8dcec2f5-6e9c-49db-85c4-38737b786a51" />
+
 
 5. Add GitHub Actions Workflow
 
@@ -69,6 +72,10 @@ Docker Build
 Trivy Image Scan & Report Upload
 
 Push Docker image to AWS ECR
+<img width="1604" height="321" alt="image" src="https://github.com/user-attachments/assets/4311854f-9be3-42a3-88c2-f82a603c4253" />
+
+<img width="480" height="820" alt="image" src="https://github.com/user-attachments/assets/f1c4c3a9-bad1-4c0d-9408-1547dddebf5d" />
+
 
 6. Create and Configure EKS Cluster
 eksctl create cluster \
